@@ -1,0 +1,5 @@
+/home/jacque/Projects/F-sharp/ParserCombinators/ParserCombinators/obj/x86/Debug/.NETFramework,Version=v4.5.1.AssemblyAttribute.fs
+/home/jacque/Projects/F-sharp/ParserCombinators/ParserCombinators/bin/Debug/ParserCombinators.exe.mdb
+/home/jacque/Projects/F-sharp/ParserCombinators/ParserCombinators/bin/Debug/ParserCombinators.exe
+/home/jacque/Projects/F-sharp/ParserCombinators/ParserCombinators/obj/x86/Debug/ParserCombinators.exe
+/home/jacque/Projects/F-sharp/ParserCombinators/ParserCombinators/obj/x86/Debug/ParserCombinators.exe.mdb
