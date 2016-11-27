@@ -156,6 +156,91 @@ printfn "We now test our 'and then' combinator:\n"
 run parseAThenB "ABC" |> printfn "%A"
 run parseAThenB "ZBC" |> printfn "%A"
 run parseAThenB "AZC" |> printfn "%A"
+printfn "\n"
+
+//Choosing between 2 parsers: the "orElse" combinator
+
+(*Logic implementation:
+1. Run then first Parser
+2. On Success, return the parsed ValueType along with then remaining inputABC
+3. Otherwise, on Fail, run then second Parser with then original input,
+and in this case, return the Result (Success or Fail) from then second Parser.
+ *)
+let orElse parser1 parser2 =
+    let innerFn input =
+        //Run parser1 with the input
+        let result1 = run parser1 input
+        //Test the result for Failure/Success
+        match result1 with
+        | Success result -> 
+            // if Success, return the original result
+            result1
+        | Fail err -> 
+            // if Fail, run parser2 with the input
+            let result2 = run parser2 input 
+            // Return parser2's result
+            result2
+    Parser innerFn
+// Define an infix operator function for `orElse`
+let ( <|> ) = orElse
+// Testing the orElse parser
+let ParseA = pchar4 'A'
+let ParseB = pchar4 'B'
+let parseAorElseB = ParseA <|> ParseB
+
+printfn "Results of the orElse combinator:\n"
+run parseAorElseB "AZZ" |> printfn "%A"
+run parseAorElseB "BZZ" |> printfn "%A"
+run parseAorElseB "CZZ" |> printfn "%A"
+printfn "\n"
+
+(* Combining the `andThen` and `orElse` parser combinators to
+build more complex ones, such as "A and then (BorC)"
+Here is how to build then AandThenBorC combinator from simpler ones:
+*)
+let parse_A = pchar4 'A'
+let parse_B = pchar4 'B'
+let parse_C = pchar4 'C'
+let BorElseC = parse_B <|> parse_C
+let AandThenBorC = parse_A .>>. BorElseC
+
+//and here it is in action:
+printfn "Results of the AandThenBorC parser combinator:\n"
+run AandThenBorC "ABZ" |> printfn "%A"
+run AandThenBorC "ACZ" |> printfn "%A"
+run AandThenBorC "QBZ" |> printfn "%A"
+run AandThenBorC "AQZ" |> printfn "%A"
+
+(*Choosing from a list of parsers: "choice" and "anyOf"
+Suppose you want to choose from as list of parsers instead of
+only 2. If we have a pairwise way of combining things, we can 
+extend that concept to combining and entire list using `reduce`.
+This example will fail if the input list is an empty list.
+*)
+let choice listOfParsers = 
+    List.reduce ( <|> ) listOfParsers
+//Choose any of a list of characters
+let anyOf listOfChars =
+    listOfChars
+    |> List.map pchar4
+    |> choice
+
+(*Test it by creating a parser for any lowercase letter
+and any digit character
+*)
+let parseLowercase =
+    anyOf ['a'..'z']
+
+let parseDigit = 
+    anyOf ['0'..'9']
+
+printfn "Testing our `choice` and `anyOf` parser combinator:"
+run parseLowercase "aBC" |> printfn "%A"
+run parseLowercase "ABC" |> printfn "%A"
+run parseDigit "1ABC" |> printfn "%A" 
+run parseDigit "9ABC" |> printfn "%A"
+run parseDigit "|ABC" |> printfn "%A"
+
 
 [<EntryPoint>]
 let main argv = 
