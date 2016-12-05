@@ -240,8 +240,330 @@ run parseLowercase "ABC" |> printfn "%A"
 run parseDigit "1ABC" |> printfn "%A" 
 run parseDigit "9ABC" |> printfn "%A"
 run parseDigit "|ABC" |> printfn "%A"
+printfn "\n"
 
+//Using map to transform the contents of a parser
+//Using a map function in "parser world"
+let mapP f parser = 
+    let innerFn input =
+        // run parser with the input
+        let result = run parser input
+        // test the result for Failure/Success
+        match result with
+        | Success (value,remaining) -> 
+            // if success, return the value transformed by f
+            let newValue = f value
+            Success (newValue, remaining)
+        | Fail err -> 
+            // if failed, return the error
+            Fail err
+    // return the inner function
+    Parser innerFn 
+//defining an infix for map
+let ( <!> ) = mapP
+(*And in the context of parsing, we'll often want to put the mapping function 
+after the parser, with the parameters flipped. 
+This makes using map with the pipeline idiom much more convenient: *)
+let ( |>> ) x f = mapP f x
 
+(*With mapP available, we can revisit parseThreeDigits and turn the tuple 
+into a string. *)
+let parseDigit2 = anyOf ['0'..'9']
+
+let parseThreeDigitsAsStr = 
+    // create a parser that returns a tuple
+    let tupleParser = 
+        parseDigit .>>. parseDigit .>>. parseDigit
+    // create a function that turns the tuple into a string
+    let transformTuple ((c1, c2), c3) = 
+        String [| c1; c2; c3 |]
+    // use "map" to combine them
+    mapP transformTuple tupleParser 
+
+//Or, if you prefer a more compact implementation:
+let parse3DigitsAsStr = 
+    (parseDigit .>>. parseDigit .>>. parseDigit)
+    |>> fun ((c1, c2), c3) -> String [| c1; c2; c3 |]
+printfn "Using map in parser world:"
+run parseThreeDigitsAsStr "123A" |> printfn "%A"  // Success ("123", "A")
+run parse3DigitsAsStr "456B" |> printfn "%A"
+
+//map the string into an int:
+let parseThreeDigitsAsInt = 
+    mapP int parseThreeDigitsAsStr
+run parseThreeDigitsAsInt "123A" |> printfn "%A"
+
+(*`apply` and `return` -- lifting functions up into "parser world"
+
+To achieve our goal of creating a parser that matches a list of characters, 
+we need two more helper functions which I will call returnP and applyP.
+
+returnP simply transforms a normal value into a value in Parser World
+applyP transforms a Parser containing a function (Parser< 'a->'b >) 
+into a function in Parser World (Parser<'a> -> Parser<'b >)
+*)
+let returnP x =
+    let innerFn input =
+        // ignore the input and return x
+        Success (x, input)
+    // return the inner function
+    Parser innerFn
+
+//Here is the implementation of `applyP`, which uses .>>. and map:
+let applyP fP xP =
+    // create a parser containing a pair (f,x)
+    (fP .>>. xP)
+    // map the pair by applying f to x
+    |> mapP (fun (f, x) -> f x)
+
+// Defining an infix operatpr for applyP:
+let (<*>) = applyP
+
+(* Using `returnP` and `applyP` together, we can lift any function 
+in "normal world" into a function in "parser world" regardless of 
+how many parameters it has. Example: we can now define a `lift2`
+function that will lift a 2-parameter function into "parser world" *)
+let lift2 f xP yP =
+    returnP f <*> xP <*> yP
+
+//Lifting integer addition to the addition of parsers
+let addP = lift2 (+)
+
+//Lifting a bool to parser world and returning Parser<bool>
+let startsWith (str:string) prefix =
+    str.StartsWith(prefix)
+
+let startsWithP = lift2 startsWith
+
+//sequence -- transforming a list of Parsers into a single Parser
+
+let rec sequence parserList =
+    // define the "cons" function, which is a two parameter function
+    let cons head tail = head::tail
+
+    // lift it to Parser World
+    let consP = lift2 cons
+
+    // process the list of parsers recursively
+    match parserList with
+    | [] -> 
+        returnP []
+    | head::tail ->
+        consP head (sequence tail)
+
+let parsers = [ pchar4 'A'; pchar4 'B'; pchar4 'C' ]
+let combined = sequence parsers
+
+run combined "ABCD" |> printfn "%A"
+
+printfn "\n"
+
+(* Implementing the pstring parser
+At last, we can implement the parser that matches a string, 
+which we'll call pstring.
+
+The logic is:
+
+Convert the string into a list of characters.
+Convert each character into a Parser<char>.
+Use sequence to convert the list of Parser<char> into a single Parser<char list>.
+And finally, use map to convert the Parser<char list> into a Parser<string>.
+Here's the code:
+*)
+/// Helper to create a string from a list of chars
+let charListToStr charList = 
+    String(List.toArray charList)
+
+// match a specific string
+let pstring str = 
+    str
+    // convert to list of char
+    |> List.ofSeq
+    // map each char to a pchar
+    |> List.map pchar4 
+    // convert to Parser<char list>
+    |> sequence
+    // convert Parser<char list> to Parser<string>
+    |> mapP charListToStr 
+//Let's test it:
+
+let parseABC = pstring "ABC"
+printfn "Implementing the pstring parser:\n"
+run parseABC "ABCDE" |> printfn "%A" // Success ("ABC", "DE")
+run parseABC "A|CDE" |> printfn "%A" // Failure "Expecting 'B'. Got '|'"
+run parseABC "AB|DE" |> printfn "%A" // Failure "Expecting 'C'. Got '|'"
+
+printfn "\n"
+
+//4. many and many1 -- matching a parser multiple times
+// Our helper function which we'll need to define `many`
+let rec parseZeroOrMore parser input =
+    // run parser with the input
+    let firstResult = run parser input 
+    // test the result for Failure/Success
+    match firstResult with
+    | Fail err -> 
+        // if parse fails, return empty list
+        ([],input)  
+    | Success (firstValue,inputAfterFirstParse) -> 
+        // if parse succeeds, call recursively
+        // to get the subsequent values
+        let (subsequentValues,remainingInput) = 
+            parseZeroOrMore parser inputAfterFirstParse
+        let values = firstValue::subsequentValues
+        (values,remainingInput) 
+
+//Defining `many` -- wrapped over `parseZeroOrMore`
+let many parser = 
+    let rec innerFn input = 
+        //parse the input, wrap it in Success since it always succeeds
+        Success(parseZeroOrMore parser input)
+    Parser innerFn
+
+// Testing `many`
+let manyA = many(pchar4 'A')
+//test for some success cases
+run manyA "ABCD" |> printfn "%A"
+run manyA "AACD" |> printfn "%A"
+run manyA "AAAD" |> printfn "%A"
+//test case with no matches
+run manyA "|BCD" |> printfn "%A"
+
+(*There's nothing about many that restricts its use to single characters. 
+For example, we can use it to match repetitive string sequences too: *)
+printfn "\n"
+printfn "Using `many` on a string sequence:\n"
+
+let manyAB = many (pstring "AB")
+
+run manyAB "ABCD" |> printfn "%A"
+run manyAB "ABABCD" |> printfn "%A"
+run manyAB "ZCD" |> printfn "%A"
+run manyAB "AZCD" |> printfn "%A"
+printfn "\n"
+//Implementing the original example of matching whitespace:
+printfn "Implementing the original example of matching whitespace:\n"
+
+let whitespaceChar = anyOf [' '; '\t'; '\n']
+let whitespace = many whitespaceChar 
+
+run whitespace "ABC" |> printfn "%A" // Success ([], "ABC")
+run whitespace " ABC" |> printfn "%A"  // Success ([' '], "ABC")
+run whitespace "\tABC" |> printfn "%A" // Success (['\t'], "ABC")
+
+(*Defining many1
+We can also define the "one or more" combinator many1, using the following logic:
+Run the parser.
+If it fails, return the failure.
+If it succeeds:
+Call the helper function parseZeroOrMore to get the remaining values.
+Then combine the first value and the remaining values.*)
+
+printfn "\n"
+printfn "The one-or-more combinator, `many1`:\n"
+// match one or more occurences of the specified parser
+let many1 parser = 
+    let rec innerFn input =
+        // run parser with the input
+        let firstResult = run parser input 
+        // test the result for Failure/Success
+        match firstResult with
+        | Fail err -> 
+            Fail err // failed
+        | Success (firstValue,inputAfterFirstParse) -> 
+            // if first found, look for zeroOrMore now
+            let (subsequentValues,remainingInput) = 
+                parseZeroOrMore parser inputAfterFirstParse
+            let values = firstValue::subsequentValues
+            Success (values,remainingInput)  
+    Parser innerFn
+
+// define parser for one digit
+let digit = anyOf ['0'..'9']
+
+// define parser for one or more digits
+let digits = many1 digit 
+
+run digits "1ABC" |> printfn "%A" // Success (['1'], "ABC")
+run digits "12BC" |> printfn "%A"// Success (['1'; '2'], "BC")
+run digits "123C" |> printfn "%A" // Success (['1'; '2'; '3'], "C")
+run digits "1234" |> printfn "%A" // Success (['1'; '2'; '3'; '4'], "")
+//No digits match case
+run digits "ABC"  |> printfn "%A" // Failure "Expecting '9'. Got 'A'"
+printfn "\n"
+
+(*Using many1, we can create a parser for an integer. 
+The implementation logic is:
+
+- Create a parser for a digit.
+- Use many1 to get a list of digits.
+- Using map, transform the result (a list of digits) into a string 
+and then into an int. *)
+let pint = 
+    // helper
+    let resultToInt digitList = 
+        // ignore int overflow for now
+        String(List.toArray digitList) |> int
+    // define parser for one digit
+    let digit = anyOf ['0'..'9']
+    // define parser for one or more digits
+    let digits = many1 digit 
+    // map the digits to an int
+    digits 
+    |> mapP resultToInt
+
+printfn "Using map, transform the list of digits into a string \r" 
+printfn "and then into an int:\n"
+
+run pint "1ABC" |> printfn "%A" // Success (1, "ABC")
+run pint "12BC" |> printfn "%A" // Success (12, "BC")
+run pint "123C" |> printfn "%A"// Success (123, "C")
+run pint "1234" |> printfn "%A" // Success (1234, "")
+run pint "ABC" |> printfn "%A"  // Failure "Expecting '9'. Got 'A'"
+
+printfn "\n"
+
+(*We can define an opt combinator easily:
+
+Change the result of a specified parser to an option by mapping the result to Some.
+Create another parser that always returns None.
+Use <|> to choose the second ("None") parser if the first fails.
+*)
+let opt p =
+    let some = p |>> Some
+    let none = returnP None
+    some <|> none
+//We've already defined digit on line #485 above
+//We match a digit followed by an optional semicolon:
+let digitThenSemicolon = digit .>>. opt (pchar4 ';')
+printfn "Demonstrating the opt parser combinator:\n"
+run digitThenSemicolon "1;"|> printfn "%A"  // Success (('1', Some ';'), "")
+run digitThenSemicolon "1" |> printfn "%A"  // Success (('1', None), "")
+
+printfn "\n"
+//And here is pint rewritten to handle an optional minus sign: 
+let pint2 = 
+    // helper
+    let resultToInt (sign,charList) = 
+        let i = String(List.toArray charList) |> int
+        match sign with
+        | Some ch -> -i  // negate the int
+        | None -> i
+        
+    // define parser for one digit
+    let digit = anyOf ['0'..'9']
+
+    // define parser for one or more digits
+    let digits = many1 digit 
+
+    // parse and convert
+    opt (pchar4 '-') .>>. digits 
+    |>> resultToInt 
+printfn "pint rewritten to handle negative numbers with opt:\n"
+run pint2 "123C" |> printfn "%A"  // Success (123, "C")
+run pint2 "-123C" |> printfn "%A" // Success (-123, "C")
+
+printfn "\n"
 [<EntryPoint>]
 let main argv = 
     printfn "%A" argv
