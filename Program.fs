@@ -13,6 +13,7 @@ let a_parser str =
 
 let inputABC = "ABC"
 let inputZBC = "ZBC"
+let inputEDI = "*~"
 a_parser inputABC |> printfn "%A"
 a_parser inputZBC |> printfn "%A"
 
@@ -33,7 +34,7 @@ let pchar (charToMatch, str) =
 
 pchar ('A', inputABC) |> printfn "%A"
 pchar ('A', inputZBC) |> printfn "%A"
-
+pchar ('~', inputEDI) |> printfn "%A"
 //Returning a Success or Fail
 type Result<'a> =
     | Success of 'a
@@ -532,7 +533,7 @@ Use <|> to choose the second ("None") parser if the first fails.
 let opt p =
     let some = p |>> Some
     let none = returnP None
-    some <|> none
+    some  <|> none 
 //We've already defined digit on line #485 above
 //We match a digit followed by an optional semicolon:
 let digitThenSemicolon = digit .>>. opt (pchar4 ';')
@@ -549,10 +550,8 @@ let pint2 =
         match sign with
         | Some ch -> -i  // negate the int
         | None -> i
-        
     // define parser for one digit
     let digit = anyOf ['0'..'9']
-
     // define parser for one or more digits
     let digits = many1 digit 
 
@@ -564,6 +563,123 @@ run pint2 "123C" |> printfn "%A"  // Success (123, "C")
 run pint2 "-123C" |> printfn "%A" // Success (-123, "C")
 
 printfn "\n"
+
+printfn "Keeping some results, discarding others:\n"
+let (.>>) p1 p2 = 
+    // create a pair
+    p1 .>>. p2 
+    // then only keep the first value
+    |> mapP (fun (a,b) -> a) 
+
+
+/// Keep only the result of the right side parser    
+let (>>.) p1 p2 = 
+    // create a pair
+    p1 .>>. p2 
+    // then only keep the second value
+    |> mapP (fun (a,b) -> b)
+
+/// Keep only the result of the left side parser
+(* These combinators allow us to simplify the 
+digitThenSemicolon example shown earlier:
+
+let digit = anyOf ['0'..'9']
+
+// use .>> below
+let digitThenSemicolon = digit .>> opt (pchar ';')  
+
+run digitThenSemicolon "1;"  // Success ('1', "")
+run digitThenSemicolon "1"   // Success ('1', "")
+*)
+printfn "Use .>> to keep only the result of the left side parser:\n"
+let digitB4Semicolon1 = digit .>> opt (pchar4 ';')
+//the result now is the same, whether or not the semicolon was present
+run digitB4Semicolon1 "1;" |> printfn "%A"
+run digitB4Semicolon1 "1" |> printfn "%A" 
+
+printfn "\n"
+printfn "Use >>. to keep only the result of the right side parser:\n"
+
+let digitB4Semicolon2 = digit >>. opt (pchar4 ';')
+
+run digitB4Semicolon2 "1;" |> printfn "%A"
+run digitB4Semicolon2 "1" |> printfn "%A"
+
+printfn "\n"
+(*an example with whitespace - a parser that looks for "AB" 
+followed by one or more whitespace chars, followed by "CD" *)
+
+let wsChar = anyOf [' '; '\t'; '\n']
+let ws = many1 wsChar 
+
+let ab = pstring "AB"
+let cd = pstring "CD"
+let ab_cd = (ab .>> ws) .>>. cd
+printfn "A parser that looks for AB followed by one or more \r" 
+printfn "whitespace chars, followed by CD: \n"
+run ab_cd "AB \t\nCD" |> printfn "%A" // Success (("AB", "CD"), "")
+
+printfn "\n"
+
+(* A particularly common requirement is to look for a parser between delimiters such as quotes or brackets.
+
+Creating a combinator for this is trivial:
+*)
+/// Keep only the result of the middle parser
+let between p1 p2 p3 = 
+    p1 >>. p2 .>> p3 
+
+let pdoublequote = pchar4 '"'
+let quotedInteger = between pdoublequote pint pdoublequote
+
+run quotedInteger "\"1234\"" |> printfn "%A"   // Success (1234, "")
+run quotedInteger "1234" |> printfn "%A"      // Fail "Expecting '"'. Got '1'"
+printfn "\n"
+/// Parses one or more occurrences of p separated by sep
+let sepBy1 p sep =
+    let sepThenP = sep >>. p            
+    p .>>. many sepThenP 
+    |>> fun (p,pList) -> p::pList
+
+/// Parses zero or more occurrences of p separated by sep
+let sepBy p sep =
+    sepBy1 p sep <|> returnP []
+
+let comma = pchar4 ',' 
+//using the definition for digit on line #483
+let zeroOrMoreDigitList = sepBy digit comma
+let oneOrMoreDigitList = sepBy1 digit comma
+
+printfn "**Parsing between delimiters**\n"
+printfn "One or more:\n"
+run oneOrMoreDigitList "1;" |> printfn "%A"     // Success (['1'], ";")
+run oneOrMoreDigitList "1,2;" |> printfn "%A"    // Success (['1'; '2'], ";")
+run oneOrMoreDigitList "1,2,3;" |> printfn "%A"  // Success (['1'; '2'; '3'], ";")
+run oneOrMoreDigitList "Z;" |> printfn "%A"      // Failure "Expecting '9'. Got 'Z'"
+printfn "\n"
+printfn "Zero or more:\n"
+run zeroOrMoreDigitList "1;" |> printfn "%A"     // Success (['1'], ";")
+run zeroOrMoreDigitList "1,2;" |> printfn "%A"  // Success (['1'; '2'], ";")
+run zeroOrMoreDigitList "1,2,3;" |> printfn "%A"// Success (['1'; '2'; '3'], ";")
+run zeroOrMoreDigitList "Z;" |> printfn "%A"    // Success ([], "Z;")
+
+(*In an EDI text file, we see there are tildes and stars.
+What if we want to parse then tildes and/or stars? 
+
+What if we try the same thing with those as Web did with digits?
+
+// define parser for one digit
+let digit = anyOf ['0'..'9']
+
+// define parser for one or more digits
+let digits = many1 digit 
+
+*)
+
+//Define parser for one non-alphanumeric char
+let starsAndTildes = anyOf ['*'; '~']
+
+
 [<EntryPoint>]
 let main argv = 
     printfn "%A" argv
