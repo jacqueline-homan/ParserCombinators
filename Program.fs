@@ -580,6 +580,7 @@ let (>>.) p1 p2 =
     |> mapP (fun (a,b) -> b)
 
 /// Keep only the result of the left side parser
+printfn "Use .>> to keep only the result of the left side parser:\n"
 (* These combinators allow us to simplify the 
 digitThenSemicolon example shown earlier:
 
@@ -591,7 +592,6 @@ let digitThenSemicolon = digit .>> opt (pchar ';')
 run digitThenSemicolon "1;"  // Success ('1', "")
 run digitThenSemicolon "1"   // Success ('1', "")
 *)
-printfn "Use .>> to keep only the result of the left side parser:\n"
 let digitB4Semicolon1 = digit .>> opt (pchar4 ';')
 //the result now is the same, whether or not the semicolon was present
 run digitB4Semicolon1 "1;" |> printfn "%A"
@@ -615,7 +615,7 @@ let ws = many1 wsChar
 let ab = pstring "AB"
 let cd = pstring "CD"
 let ab_cd = (ab .>> ws) .>>. cd
-printfn "A parser that looks for AB followed by one or more \r" 
+printfn "The 'between' parser: A parser that looks for AB followed by one or more \r" 
 printfn "whitespace chars, followed by CD: \n"
 run ab_cd "AB \t\nCD" |> printfn "%A" // Success (("AB", "CD"), "")
 
@@ -663,10 +663,53 @@ run zeroOrMoreDigitList "1,2;" |> printfn "%A"  // Success (['1'; '2'], ";")
 run zeroOrMoreDigitList "1,2,3;" |> printfn "%A"// Success (['1'; '2'; '3'], ";")
 run zeroOrMoreDigitList "Z;" |> printfn "%A"    // Success ([], "Z;")
 
+printfn "\n"
+printfn "The bind or (>>=) combinator:\n"
+/// "bindP" takes a parser-producing function f, and a parser p
+/// and passes the output of p into f, to create a new parser 
+let bindP f p =
+    let innerFn input =
+        let result1 = run p input 
+        match result1 with
+        | Fail err -> 
+            // return error from parser1
+            Fail err  
+        | Success (value1,remainingInput) ->
+            // apply f to get a new parser
+            let p2 = f value1
+            // run parser with remaining input
+            run p2 remainingInput
+    Parser innerFn
+//The infix for bind:
+let ( >>= ) p f = bindP f p
+(*
+let mapP f =         
+    bindP (f >> returnP)
+
+let andThen p1 p2 =         
+    p1 >>= (fun p1Result -> 
+    p2 >>= (fun p2Result -> 
+        returnP (p1Result,p2Result) ))
+
+let applyP fP xP =         
+    fP >>= (fun f -> 
+    xP >>= (fun x -> 
+        returnP (f x) ))
+
+// (assuming "many" is defined)
+        
+let many1 p =         
+    p      >>= (fun head -> 
+    many p >>= (fun tail -> 
+        returnP (head::tail) ))
+
+*)
+
+
 (*In an EDI text file, we see there are tildes and stars.
 What if we want to parse then tildes and/or stars? 
 
-What if we try the same thing with those as Web did with digits?
+What if we try the same thing with those as we did with whitespaces and semicolons?
 
 // define parser for one digit
 let digit = anyOf ['0'..'9']
